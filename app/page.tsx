@@ -13,6 +13,7 @@ import TableHead from '@mui/material/TableHead';
 import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
+import TableSortLabel from '@mui/material/TableSortLabel';
 import Paper from '@mui/material/Paper';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
@@ -20,6 +21,8 @@ import Badge from '@mui/material/Badge';
 import CircularProgress from '@mui/material/CircularProgress';
 import Checkbox from '@mui/material/Checkbox';
 import Collapse from '@mui/material/Collapse';
+import Breadcrumbs from '@mui/material/Breadcrumbs';
+import MuiLink from '@mui/material/Link';
 import AddIcon from '@mui/icons-material/Add';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import KeyboardReturnIcon from '@mui/icons-material/KeyboardReturn';
@@ -31,6 +34,8 @@ import CloseIcon from '@mui/icons-material/Close';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import CalculateOutlinedIcon from '@mui/icons-material/CalculateOutlined';
 import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined';
+import TuneIcon from '@mui/icons-material/Tune';
+import EditIcon from '@mui/icons-material/Edit';
 import { EMPLOYEES, Employee, PAYROLL_GROUPS, DIVISIONS, BUSINESS_UNITS, DEPARTMENTS } from './lib/mockData';
 
 const PENDING_EMPLOYEES: Employee[] = [
@@ -41,6 +46,9 @@ const PENDING_EMPLOYEES: Employee[] = [
 const REARM_AFTER_MS = 20_000;
 const PAY_PERIOD_LABEL = 'May 1 – May 14, 2026';
 const RUN_ID = 'Run #4218';
+
+type EditableField = 'regular' | 'overtime' | 'bonus' | 'holiday' | 'vacation';
+type SortField = 'name' | 'divBusDep' | 'unitRate' | EditableField;
 
 function formatTimeAgo(from: Date, now: Date): string {
   const seconds = Math.max(0, Math.floor((now.getTime() - from.getTime()) / 1000));
@@ -76,6 +84,12 @@ export default function EditTimesheetsPage() {
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
   const [bannerOpen, setBannerOpen] = React.useState(true);
+  const [showMoreFilters, setShowMoreFilters] = React.useState(false);
+  const [sortBy, setSortBy] = React.useState<SortField | null>(null);
+  const [sortDir, setSortDir] = React.useState<'asc' | 'desc'>('asc');
+  const [editing, setEditing] = React.useState<{ id: string; field: EditableField } | null>(null);
+  const [editValue, setEditValue] = React.useState('');
+  const [dirty, setDirty] = React.useState(false);
   const rearmIndexRef = React.useRef(0);
 
   React.useEffect(() => {
@@ -123,6 +137,28 @@ export default function EditTimesheetsPage() {
     return () => clearTimeout(rearm);
   }, [pending.length, lastRefreshed]);
 
+  const sortedEmployees = React.useMemo(() => {
+    if (!sortBy) return employees;
+    const copy = [...employees];
+    copy.sort((a, b) => {
+      const av = a[sortBy];
+      const bv = b[sortBy];
+      if (typeof av === 'number' && typeof bv === 'number') return av - bv;
+      return String(av ?? '').localeCompare(String(bv ?? ''));
+    });
+    if (sortDir === 'desc') copy.reverse();
+    return copy;
+  }, [employees, sortBy, sortDir]);
+
+  const handleSort = (field: SortField) => {
+    if (sortBy === field) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortDir('asc');
+    }
+  };
+
   const allSelected = employees.length > 0 && selectedIds.size === employees.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
 
@@ -138,6 +174,86 @@ export default function EditTimesheetsPage() {
       else next.add(id);
       return next;
     });
+  };
+
+  const beginEdit = (id: string, field: EditableField, current: number) => {
+    setEditing({ id, field });
+    setEditValue(String(current ?? 0));
+  };
+
+  const commitEdit = () => {
+    if (!editing) return;
+    const parsed = Number(editValue);
+    if (!Number.isNaN(parsed) && parsed >= 0) {
+      setEmployees((prev) =>
+        prev.map((e) => (e.id === editing.id ? { ...e, [editing.field]: parsed } : e)),
+      );
+      setDirty(true);
+    }
+    setEditing(null);
+  };
+
+  const cancelEdit = () => setEditing(null);
+
+  const renderEditable = (employee: Employee, field: EditableField) => {
+    const value = employee[field] as number;
+    const isEditing = editing?.id === employee.id && editing.field === field;
+    if (isEditing) {
+      return (
+        <TextField
+          autoFocus
+          size="small"
+          variant="standard"
+          type="number"
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitEdit();
+            else if (e.key === 'Escape') cancelEdit();
+          }}
+          inputProps={{
+            'aria-label': `Edit ${field}`,
+            style: {
+              textAlign: 'right',
+              fontVariantNumeric: 'tabular-nums',
+              width: 56,
+              fontSize: 13,
+            },
+          }}
+          sx={{ '& .MuiInput-root': { fontSize: 13 } }}
+        />
+      );
+    }
+    return (
+      <Tooltip title="Click to edit" placement="top" arrow enterDelay={400}>
+        <Box
+          role="button"
+          tabIndex={0}
+          onClick={() => beginEdit(employee.id, field, value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              beginEdit(employee.id, field, value);
+            }
+          }}
+          sx={{
+            cursor: 'text',
+            display: 'inline-block',
+            minWidth: 32,
+            py: 0.25,
+            px: 0.75,
+            mx: -0.5,
+            borderRadius: 0.5,
+            outline: 'none',
+            '&:hover': { bgcolor: 'action.hover' },
+            '&:focus-visible': { boxShadow: '0 0 0 2px #1976d2 inset' },
+          }}
+        >
+          <DimNum value={value} />
+        </Box>
+      </Tooltip>
+    );
   };
 
   const refreshTooltip = (
@@ -156,41 +272,55 @@ export default function EditTimesheetsPage() {
     </Stack>
   );
 
+  const numericCol = (field: SortField, label: string) => (
+    <TableCell
+      key={field}
+      align="right"
+      sortDirection={sortBy === field ? sortDir : false}
+      sx={{ fontWeight: 600 }}
+    >
+      <TableSortLabel
+        active={sortBy === field}
+        direction={sortBy === field ? sortDir : 'asc'}
+        onClick={() => handleSort(field)}
+      >
+        {label}
+      </TableSortLabel>
+    </TableCell>
+  );
+
   return (
     <Box>
+      {/* Breadcrumb */}
+      <Breadcrumbs
+        aria-label="breadcrumb"
+        separator="›"
+        sx={{ fontSize: 12, mb: 1, color: 'text.secondary', '& .MuiBreadcrumbs-separator': { mx: 0.75 } }}
+      >
+        <MuiLink underline="hover" color="inherit" href="#" sx={{ fontSize: 12 }}>
+          Payroll
+        </MuiLink>
+        <MuiLink underline="hover" color="inherit" href="#" sx={{ fontSize: 12 }}>
+          {RUN_ID}
+        </MuiLink>
+        <Typography variant="caption" color="text.primary" sx={{ fontSize: 12, fontWeight: 500 }}>
+          Edit Timesheets
+        </Typography>
+      </Breadcrumbs>
+
       {/* Title row */}
       <Stack direction="row" alignItems="center" gap={1.5} flexWrap="wrap" mb={0.75}>
         <Typography variant="h1" component="h1">
           Edit Timesheets
         </Typography>
-        <Chip
-          size="small"
-          label={RUN_ID}
-          variant="outlined"
-          sx={{ fontWeight: 500, height: 22 }}
-        />
+        <Chip size="small" label={RUN_ID} variant="outlined" sx={{ fontWeight: 500, height: 22 }} />
       </Stack>
 
       {/* Meta row */}
       <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap" mb={2.5}>
-        <Chip
-          size="small"
-          label={`Pay period · ${PAY_PERIOD_LABEL}`}
-          variant="outlined"
-          sx={{ height: 22 }}
-        />
-        <Chip
-          size="small"
-          label="Draft"
-          color="warning"
-          sx={{ height: 22, fontWeight: 600 }}
-        />
-        <Chip
-          size="small"
-          label={`${employees.length} employees`}
-          variant="outlined"
-          sx={{ height: 22 }}
-        />
+        <Chip size="small" label={`Pay period · ${PAY_PERIOD_LABEL}`} variant="outlined" sx={{ height: 22 }} />
+        <Chip size="small" label="Draft" color="warning" sx={{ height: 22, fontWeight: 600 }} />
+        <Chip size="small" label={`${employees.length} employees`} variant="outlined" sx={{ height: 22 }} />
         <Box flex={1} />
         <Tooltip arrow title={refreshTooltip}>
           <Box
@@ -231,31 +361,18 @@ export default function EditTimesheetsPage() {
               invisible={pending.length === 0 || isRefreshing}
               sx={{ '& .MuiBadge-badge': { boxShadow: '0 0 0 2px #fff' } }}
             >
-              <IconButton
-                size="small"
-                disabled={isRefreshing}
-                aria-label="Refresh timesheet data"
-                sx={{ p: 0.25 }}
-              >
-                {isRefreshing ? (
-                  <CircularProgress size={14} thickness={5} />
-                ) : (
-                  <RefreshIcon sx={{ fontSize: 16 }} />
-                )}
+              <IconButton size="small" disabled={isRefreshing} aria-label="Refresh timesheet data" sx={{ p: 0.25 }}>
+                {isRefreshing ? <CircularProgress size={14} thickness={5} /> : <RefreshIcon sx={{ fontSize: 16 }} />}
               </IconButton>
             </Badge>
           </Box>
         </Tooltip>
-        <Button
-          startIcon={<SettingsOutlinedIcon />}
-          size="small"
-          variant="outlined"
-        >
+        <Button startIcon={<SettingsOutlinedIcon />} size="small" variant="outlined">
           Settings
         </Button>
       </Stack>
 
-      {/* Compressed banner — primary entry point, dismissible */}
+      {/* Compressed banner */}
       <Collapse in={bannerOpen}>
         <Paper
           variant="outlined"
@@ -284,11 +401,7 @@ export default function EditTimesheetsPage() {
           >
             Add data
           </Button>
-          <IconButton
-            size="small"
-            onClick={() => setBannerOpen(false)}
-            aria-label="Dismiss"
-          >
+          <IconButton size="small" onClick={() => setBannerOpen(false)} aria-label="Dismiss">
             <CloseIcon sx={{ fontSize: 16 }} />
           </IconButton>
         </Paper>
@@ -296,23 +409,26 @@ export default function EditTimesheetsPage() {
 
       {!bannerOpen && (
         <Box sx={{ mb: 2 }}>
-          <Button
-            component={Link}
-            href="/marketplace/"
-            size="small"
-            variant="outlined"
-            startIcon={<AddIcon />}
-          >
+          <Button component={Link} href="/marketplace/" size="small" variant="outlined" startIcon={<AddIcon />}>
             Add data to this run
           </Button>
         </Box>
       )}
 
-      {/* Filter Criteria */}
+      {/* Filter Criteria — collapsible secondary filters */}
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-        <Typography variant="h3" mb={1.5}>
-          Filter Criteria
-        </Typography>
+        <Stack direction="row" alignItems="center" mb={1.5} gap={1}>
+          <Typography variant="h3">Filter Criteria</Typography>
+          <Box flex={1} />
+          <Button
+            size="small"
+            startIcon={<TuneIcon sx={{ fontSize: 16 }} />}
+            onClick={() => setShowMoreFilters((v) => !v)}
+            sx={{ textTransform: 'none' }}
+          >
+            {showMoreFilters ? 'Fewer filters' : 'More filters (3)'}
+          </Button>
+        </Stack>
         <Stack direction="row" gap={2} flexWrap="wrap">
           <TextField
             select
@@ -328,46 +444,50 @@ export default function EditTimesheetsPage() {
             ))}
           </TextField>
           <TextField label="Last Name" size="small" sx={{ minWidth: 200 }} />
-          <TextField
-            select
-            label="Division"
-            size="small"
-            defaultValue={DIVISIONS[0]}
-            sx={{ minWidth: 200 }}
-          >
-            {DIVISIONS.map((d) => (
-              <MenuItem key={d} value={d}>
-                {d === 'All Divisions' ? 'All' : d}
-              </MenuItem>
-            ))}
-          </TextField>
-          <TextField
-            select
-            label="Business Unit"
-            size="small"
-            defaultValue={BUSINESS_UNITS[0]}
-            sx={{ minWidth: 200 }}
-          >
-            {BUSINESS_UNITS.map((b) => (
-              <MenuItem key={b} value={b}>
-                {b === 'All Business Units' ? 'All' : b}
-              </MenuItem>
-            ))}
-          </TextField>
-          <TextField
-            select
-            label="Department"
-            size="small"
-            defaultValue={DEPARTMENTS[0]}
-            sx={{ minWidth: 200 }}
-          >
-            {DEPARTMENTS.map((d) => (
-              <MenuItem key={d} value={d}>
-                {d === 'All Departments' ? 'All' : d}
-              </MenuItem>
-            ))}
-          </TextField>
         </Stack>
+        <Collapse in={showMoreFilters}>
+          <Stack direction="row" gap={2} flexWrap="wrap" mt={2}>
+            <TextField
+              select
+              label="Division"
+              size="small"
+              defaultValue={DIVISIONS[0]}
+              sx={{ minWidth: 200 }}
+            >
+              {DIVISIONS.map((d) => (
+                <MenuItem key={d} value={d}>
+                  {d === 'All Divisions' ? 'All' : d}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Business Unit"
+              size="small"
+              defaultValue={BUSINESS_UNITS[0]}
+              sx={{ minWidth: 200 }}
+            >
+              {BUSINESS_UNITS.map((b) => (
+                <MenuItem key={b} value={b}>
+                  {b === 'All Business Units' ? 'All' : b}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Department"
+              size="small"
+              defaultValue={DEPARTMENTS[0]}
+              sx={{ minWidth: 200 }}
+            >
+              {DEPARTMENTS.map((d) => (
+                <MenuItem key={d} value={d}>
+                  {d === 'All Departments' ? 'All' : d}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Stack>
+        </Collapse>
       </Paper>
 
       {/* Selection toolbar OR helper row */}
@@ -389,41 +509,27 @@ export default function EditTimesheetsPage() {
             <Typography variant="body2" sx={{ fontWeight: 600, mr: 2 }}>
               {selectedIds.size} selected
             </Typography>
-            <Button
-              size="small"
-              startIcon={<CardGiftcardOutlinedIcon />}
-              sx={{ textTransform: 'none' }}
-            >
+            <Button size="small" startIcon={<CardGiftcardOutlinedIcon />} sx={{ textTransform: 'none' }}>
               Apply bonus
             </Button>
-            <Button
-              size="small"
-              startIcon={<CalculateOutlinedIcon />}
-              sx={{ textTransform: 'none' }}
-            >
+            <Button size="small" startIcon={<CalculateOutlinedIcon />} sx={{ textTransform: 'none' }}>
               Recalculate
             </Button>
-            <Button
-              size="small"
-              startIcon={<BlockOutlinedIcon />}
-              color="warning"
-              sx={{ textTransform: 'none' }}
-            >
+            <Button size="small" startIcon={<BlockOutlinedIcon />} color="warning" sx={{ textTransform: 'none' }}>
               Exclude
             </Button>
             <Box flex={1} />
-            <Button
-              size="small"
-              onClick={() => setSelectedIds(new Set())}
-              sx={{ textTransform: 'none' }}
-            >
+            <Button size="small" onClick={() => setSelectedIds(new Set())} sx={{ textTransform: 'none' }}>
               Clear
             </Button>
           </>
         ) : (
-          <Typography variant="caption" color="text.secondary">
-            Tip: select rows to apply bonuses, recalculate, or exclude in bulk.
-          </Typography>
+          <Stack direction="row" alignItems="center" gap={0.75}>
+            <EditIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
+            <Typography variant="caption" color="text.secondary">
+              Click any number to edit. Select rows to apply bonuses, recalculate, or exclude in bulk.
+            </Typography>
+          </Stack>
         )}
       </Box>
 
@@ -441,18 +547,34 @@ export default function EditTimesheetsPage() {
                   inputProps={{ 'aria-label': 'Select all employees' }}
                 />
               </TableCell>
-              <TableCell sx={{ fontWeight: 600 }}>Employee Name</TableCell>
-              <TableCell sx={{ fontWeight: 600 }}>Div / Bus / Dep</TableCell>
-              <TableCell sx={{ fontWeight: 600 }} align="right">Unit Rate</TableCell>
-              <TableCell sx={{ fontWeight: 600 }} align="right">Regular</TableCell>
-              <TableCell sx={{ fontWeight: 600 }} align="right">Overtime</TableCell>
-              <TableCell sx={{ fontWeight: 600 }} align="right">Bonus</TableCell>
-              <TableCell sx={{ fontWeight: 600 }} align="right">Holiday</TableCell>
-              <TableCell sx={{ fontWeight: 600 }} align="right">Vacation</TableCell>
+              <TableCell sortDirection={sortBy === 'name' ? sortDir : false} sx={{ fontWeight: 600 }}>
+                <TableSortLabel
+                  active={sortBy === 'name'}
+                  direction={sortBy === 'name' ? sortDir : 'asc'}
+                  onClick={() => handleSort('name')}
+                >
+                  Employee Name
+                </TableSortLabel>
+              </TableCell>
+              <TableCell sortDirection={sortBy === 'divBusDep' ? sortDir : false} sx={{ fontWeight: 600 }}>
+                <TableSortLabel
+                  active={sortBy === 'divBusDep'}
+                  direction={sortBy === 'divBusDep' ? sortDir : 'asc'}
+                  onClick={() => handleSort('divBusDep')}
+                >
+                  Div / Bus / Dep
+                </TableSortLabel>
+              </TableCell>
+              {numericCol('unitRate', 'Unit Rate')}
+              {numericCol('regular', 'Regular')}
+              {numericCol('overtime', 'Overtime')}
+              {numericCol('bonus', 'Bonus')}
+              {numericCol('holiday', 'Holiday')}
+              {numericCol('vacation', 'Vacation')}
             </TableRow>
           </TableHead>
           <TableBody>
-            {employees.map((e) => (
+            {sortedEmployees.map((e) => (
               <TableRow key={e.id} hover selected={selectedIds.has(e.id)}>
                 <TableCell padding="checkbox">
                   <Checkbox
@@ -476,11 +598,11 @@ export default function EditTimesheetsPage() {
                 <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
                   ${e.unitRate.toFixed(2)}
                 </TableCell>
-                <TableCell align="right"><DimNum value={e.regular} /></TableCell>
-                <TableCell align="right"><DimNum value={e.overtime} /></TableCell>
-                <TableCell align="right"><DimNum value={e.bonus} /></TableCell>
-                <TableCell align="right"><DimNum value={e.holiday} /></TableCell>
-                <TableCell align="right"><DimNum value={e.vacation} /></TableCell>
+                <TableCell align="right">{renderEditable(e, 'regular')}</TableCell>
+                <TableCell align="right">{renderEditable(e, 'overtime')}</TableCell>
+                <TableCell align="right">{renderEditable(e, 'bonus')}</TableCell>
+                <TableCell align="right">{renderEditable(e, 'holiday')}</TableCell>
+                <TableCell align="right">{renderEditable(e, 'vacation')}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -488,31 +610,13 @@ export default function EditTimesheetsPage() {
       </Paper>
 
       {/* Inline legend + count */}
-      <Stack
-        direction="row"
-        gap={1}
-        alignItems="center"
-        sx={{ mt: 1, mb: 2, flexWrap: 'wrap' }}
-      >
+      <Stack direction="row" gap={1} alignItems="center" sx={{ mt: 1, mb: 2, flexWrap: 'wrap' }}>
         <Typography variant="caption" color="text.secondary">
           Row colors:
         </Typography>
-        <Chip
-          label="Selected"
-          size="small"
-          sx={{ bgcolor: '#cfe9f1', height: 18, fontSize: 10.5 }}
-        />
-        <Chip
-          label="Changed"
-          size="small"
-          sx={{ bgcolor: '#fff7c2', height: 18, fontSize: 10.5 }}
-        />
-        <Chip
-          label="Not changed"
-          size="small"
-          variant="outlined"
-          sx={{ height: 18, fontSize: 10.5 }}
-        />
+        <Chip label="Selected" size="small" sx={{ bgcolor: '#cfe9f1', height: 18, fontSize: 10.5 }} />
+        <Chip label="Changed" size="small" sx={{ bgcolor: '#fff7c2', height: 18, fontSize: 10.5 }} />
+        <Chip label="Not changed" size="small" variant="outlined" sx={{ height: 18, fontSize: 10.5 }} />
         <Box flex={1} />
         <Typography variant="caption" color="text.secondary">
           {employees.length} employees
@@ -539,24 +643,18 @@ export default function EditTimesheetsPage() {
           boxShadow: '0 -2px 8px rgba(0,0,0,0.04)',
         }}
       >
-        <Typography variant="caption" color="text.secondary">
-          {selectedIds.size === 0
-            ? 'No unsaved changes'
-            : `${selectedIds.size} selected · unsaved`}
+        <Typography variant="caption" color={dirty ? 'warning.dark' : 'text.secondary'} sx={{ fontWeight: dirty ? 600 : 400 }}>
+          {dirty
+            ? `Unsaved changes${selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ''}`
+            : selectedIds.size > 0
+            ? `${selectedIds.size} selected`
+            : 'No unsaved changes'}
         </Typography>
         <Box flex={1} />
-        <Button
-          startIcon={<KeyboardReturnIcon />}
-          variant="outlined"
-          size="medium"
-        >
+        <Button startIcon={<KeyboardReturnIcon />} variant="outlined" size="medium">
           Return to Create Timesheets
         </Button>
-        <Button
-          startIcon={<SaveOutlinedIcon />}
-          variant="contained"
-          size="medium"
-        >
+        <Button startIcon={<SaveOutlinedIcon />} variant="contained" size="medium" onClick={() => setDirty(false)}>
           Save Timesheets
         </Button>
       </Box>
